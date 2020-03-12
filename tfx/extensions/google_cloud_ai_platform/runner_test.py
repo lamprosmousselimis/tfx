@@ -265,8 +265,7 @@ class RunnerTest(tf.test.TestCase):
     self.assertEqual('1.15', runner._get_tf_runtime_version('1.15.0'))
     self.assertEqual('1.15', runner._get_tf_runtime_version('1.15.1'))
     self.assertEqual('1.15', runner._get_tf_runtime_version('2.0.0'))
-    self.assertEqual('1.15', runner._get_tf_runtime_version('2.0.1'))
-    self.assertEqual('2.1', runner._get_tf_runtime_version('2.1.0'))
+    self.assertEqual('1.15', runner._get_tf_runtime_version('2.1.0'))
 
   def testGetCaipPythonVersion(self):
     if sys.version_info.major == 2:
