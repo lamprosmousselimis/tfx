@@ -27,6 +27,7 @@ from google.protobuf import json_format
 from tfx import types
 from tfx.components.base import base_executor
 from tfx.components.infra_validator import error_types
+
 from tfx.components.infra_validator import request_builder
 from tfx.components.infra_validator import serving_bins
 from tfx.components.infra_validator import types as iv_types
@@ -123,7 +124,7 @@ class Executor(base_executor.BaseExecutor):
       serving_spec.model_name = _DEFAULT_MODEL_NAME
 
     validation_spec = infra_validator_pb2.ValidationSpec()
-    if exec_properties.get('validation_spec'):
+    if 'validation_spec' in exec_properties:
       json_format.Parse(exec_properties['validation_spec'], validation_spec)
     if not validation_spec.num_tries:
       validation_spec.num_tries = _DEFAULT_NUM_TRIES
@@ -136,7 +137,8 @@ class Executor(base_executor.BaseExecutor):
       json_format.Parse(exec_properties['request_spec'], request_spec)
       examples = artifact_utils.get_single_instance(input_dict['examples'])
       requests = request_builder.build_requests(
-          model_name=serving_spec.model_name,
+          model_name=os.path.basename(
+              os.path.dirname(path_utils.serving_model_path(model.uri))),
           examples=examples,
           request_spec=request_spec)
     else:
@@ -196,9 +198,7 @@ class Executor(base_executor.BaseExecutor):
       validation_spec: infra_validator_pb2.ValidationSpec,
       requests: List[iv_types.Request]):
 
-    for i in range(validation_spec.num_tries):
-      logging.info('Infra validation trial %d/%d start.', i + 1,
-                   validation_spec.num_tries)
+    for _ in range(validation_spec.num_tries):
       try:
         self._ValidateOnce(
             model_path=model_path,
@@ -210,7 +210,7 @@ class Executor(base_executor.BaseExecutor):
         return True
       except Exception as e:  # pylint: disable=broad-except
         # Exception indicates validation failure. Log the error and retry.
-        logging.exception(e)
+        logging.error(e)
         if isinstance(e, error_types.DeadlineExceeded):
           logging.info('Consider increasing the value of '
                        'ValidationSpec.max_loading_time_seconds.')

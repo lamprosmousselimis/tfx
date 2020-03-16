@@ -19,7 +19,6 @@ from __future__ import division
 from __future__ import print_function
 
 import abc
-import os
 from typing import Any, Dict, List, Optional, Text
 
 from docker import types as docker_types
@@ -28,7 +27,6 @@ import six
 from tfx.components.infra_validator.model_server_clients import base_client
 from tfx.components.infra_validator.model_server_clients import tensorflow_serving_client
 from tfx.proto import infra_validator_pb2
-from tfx.utils.model_paths import tf_serving_flavor
 
 
 def parse_serving_binaries(  # pylint: disable=invalid-name
@@ -110,7 +108,7 @@ class ServingBinary(six.with_metaclass(abc.ABCMeta, object)):
 class TensorFlowServing(ServingBinary):
   """TensorFlow Serving binary."""
 
-  _BASE_DOCKER_RUN_PARAMS = {
+  _base_docker_run_args = {
       # Enable auto-removal of the container on docker daemon after container
       # process exits.
       'auto_remove': True,
@@ -145,11 +143,9 @@ class TensorFlowServing(ServingBinary):
     return self._image
 
   def MakeEnvVars(
-      self, model_path: Optional[Text] = None) -> Dict[Text, Text]:
-    if model_path is None:
+      self, model_base_path: Optional[Text] = None) -> Dict[Text, Text]:
+    if model_base_path is None:
       model_base_path = self._DEFAULT_MODEL_BASE_PATH
-    else:
-      model_base_path = tf_serving_flavor.parse_model_base_path(model_path)
     return {
         'MODEL_NAME': self._model_name,
         'MODEL_BASE_PATH': model_base_path
@@ -158,49 +154,41 @@ class TensorFlowServing(ServingBinary):
   def MakeDockerRunParams(
       self,
       host_port: int,
-      model_path: Text,
-      needs_mount: bool) -> Dict[Text, Any]:
+      remote_model_base_path: Optional[Text] = None,
+      host_model_base_path: Optional[Text] = None
+  ):
     """Make parameters for docker `client.containers.run`.
 
     Args:
       host_port: Available port in the host to bind with container port.
-      model_path: A path to the model.
-      needs_mount: If True, model_path will be mounted to the container.
+      remote_model_base_path: (Optional) Model base path in the remote
+          destination. (e.g. `gs://your_bucket/model_base_path`.) Use this
+          argument if you have model in the remote place.
+      host_model_base_path: (Optional) Model base path in the host machine.
+          (i.e. local path during the execution.) This would create a volume
+          mount from `host_model_base_path` to the container model base path
+          (i.e. `/model`).
 
     Returns:
       A dictionary of docker run parameters.
     """
     result = dict(
-        self._BASE_DOCKER_RUN_PARAMS,
+        self._base_docker_run_args,
         image=self._image,
         ports={
             '{}/tcp'.format(self.container_port): host_port
-        })
+        },
+        environment=self.MakeEnvVars(model_base_path=remote_model_base_path))
 
-    if needs_mount:
-      # model_path should be a local directory. In order to make TF Serving see
-      # the host model path, we need to mount model path volume to the
-      # container.
-      assert os.path.isdir(model_path), '{} does not exist'.format(model_path)
-      container_model_path = tf_serving_flavor.make_model_path(
-          model_base_path=self._DEFAULT_MODEL_BASE_PATH,
-          model_name=self._model_name,
-          version=1)
-      result.update(
-          environment=self.MakeEnvVars(),
-          mounts=[
-              docker_types.Mount(
-                  type='bind',
-                  target=container_model_path,
-                  source=model_path,
-                  read_only=True)
-          ])
-    else:
-      # model_path is presumably a remote URI. TF Serving is able to pickup
-      # model in remote directly using gfile, so all we need to do is setting
-      # environment variables correctly.
-      result.update(
-          environment=self.MakeEnvVars(model_path=model_path))
+    if host_model_base_path is not None:
+      # TODO(b/149534564): Replace os.path to pathlib.PurePosixPath after py3.
+      result.update(mounts=[
+          docker_types.Mount(
+              type='bind',
+              target=self._DEFAULT_MODEL_BASE_PATH,
+              source=host_model_base_path,
+              read_only=True)
+      ])
 
     return result
 
